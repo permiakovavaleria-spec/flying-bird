@@ -243,7 +243,7 @@
     <section class="overlay" id="overlay">
       <div class="modal">
         <h1 id="title">Flying Bird</h1>
-        <p id="message">Tap, click, or press Space to flap through the garden gates.</p>
+        <p id="message">Tap on a phone or press Space on a computer to fly through the pipes.</p>
         <div class="actions">
           <button class="primary" id="startButton" type="button">Start</button>
           <button class="secondary" id="resetButton" type="button">Reset best</button>
@@ -251,7 +251,7 @@
       </div>
     </section>
 
-    <div class="toast" id="toast">Tap anywhere to flap</div>
+    <div class="toast" id="toast">Phone: tap. Computer: Space.</div>
   </main>
 
   <script>
@@ -289,9 +289,13 @@
       const config = {
         gravity: 1720,
         flap: -510,
-        pipeSpeed: 190,
-        pipeGap: 178,
-        pipeEvery: 1.42,
+        pipeSpeed: 175,
+        minPipeSpeed: 175,
+        maxPipeSpeed: 310,
+        pipeGap: 186,
+        minPipeGap: 118,
+        pipeEvery: 1.46,
+        minPipeEvery: 1.02,
         pipeWidth: 72,
       };
 
@@ -348,6 +352,7 @@
       }
 
       function gameOver() {
+        if (state.status === "ended") return;
         state.status = "ended";
         state.shake = 12;
         if (state.score > state.best) {
@@ -382,10 +387,32 @@
 
       function addPipe(x) {
         const playable = state.height - state.ground;
-        const gap = Math.max(138, Math.min(config.pipeGap, playable * 0.32));
-        const margin = 72;
+        const difficulty = getDifficulty();
+        const gap = Math.max(config.minPipeGap, Math.min(config.pipeGap - difficulty * 4.2, playable * 0.36));
+        const margin = 64;
         const center = margin + gap / 2 + Math.random() * Math.max(1, playable - gap - margin * 2);
-        state.pipes.push({ x, top: center - gap / 2, bottom: center + gap / 2, passed: false });
+        state.pipes.push({
+          x,
+          center,
+          gap,
+          phase: Math.random() * Math.PI * 2,
+          drift: 0,
+          moveRange: Math.min(48, 8 + difficulty * 2.2),
+          moveSpeed: 1.1 + difficulty * 0.035,
+          passed: false,
+        });
+      }
+
+      function getDifficulty() {
+        return Math.min(18, state.score * 0.85 + state.time * 0.18);
+      }
+
+      function getPipeSpeed() {
+        return Math.min(config.maxPipeSpeed, config.minPipeSpeed + getDifficulty() * 7.5);
+      }
+
+      function getPipeInterval() {
+        return Math.max(config.minPipeEvery, config.pipeEvery - getDifficulty() * 0.018);
       }
 
       function update(dt) {
@@ -403,12 +430,14 @@
         if (state.status !== "playing") return;
 
         const bird = state.bird;
+        const pipeSpeed = getPipeSpeed();
         bird.vy += config.gravity * dt;
         bird.y += bird.vy * dt;
         bird.angle = Math.min(0.88, bird.angle + dt * 2.4);
 
         for (const pipe of state.pipes) {
-          pipe.x -= config.pipeSpeed * dt;
+          pipe.x -= pipeSpeed * dt;
+          pipe.drift = Math.sin(state.time * pipe.moveSpeed + pipe.phase) * pipe.moveRange;
           if (!pipe.passed && pipe.x + config.pipeWidth < bird.x - bird.radius) {
             pipe.passed = true;
             state.score += 1;
@@ -417,7 +446,7 @@
         }
 
         const lastPipe = state.pipes[state.pipes.length - 1];
-        if (lastPipe && lastPipe.x < state.width - config.pipeEvery * config.pipeSpeed) {
+        if (lastPipe && lastPipe.x < state.width - getPipeInterval() * pipeSpeed) {
           addPipe(state.width + 20);
         }
         state.pipes = state.pipes.filter((pipe) => pipe.x > -config.pipeWidth - 20);
@@ -428,8 +457,10 @@
         }
 
         for (const pipe of state.pipes) {
+          const top = pipe.center + pipe.drift - pipe.gap / 2;
+          const bottom = pipe.center + pipe.drift + pipe.gap / 2;
           const withinX = bird.x + bird.radius > pipe.x && bird.x - bird.radius < pipe.x + config.pipeWidth;
-          const hitsY = bird.y - bird.radius < pipe.top || bird.y + bird.radius > pipe.bottom;
+          const hitsY = bird.y - bird.radius < top || bird.y + bird.radius > bottom;
           if (withinX && hitsY) {
             gameOver();
             break;
@@ -495,8 +526,10 @@
 
       function drawPipes() {
         for (const pipe of state.pipes) {
-          drawPipe(pipe.x, 0, config.pipeWidth, pipe.top, true);
-          drawPipe(pipe.x, pipe.bottom, config.pipeWidth, state.height - state.ground - pipe.bottom, false);
+          const top = pipe.center + pipe.drift - pipe.gap / 2;
+          const bottom = pipe.center + pipe.drift + pipe.gap / 2;
+          drawPipe(pipe.x, 0, config.pipeWidth, top, true);
+          drawPipe(pipe.x, bottom, config.pipeWidth, state.height - state.ground - bottom, false);
         }
       }
 
@@ -612,6 +645,11 @@
         flap();
       }
 
+      function handleTouchAction(event) {
+        if (event.pointerType === "mouse") return;
+        handleAction(event);
+      }
+
       startButton.addEventListener("click", () => {
         if (state.status === "paused") pauseGame();
         else startGame();
@@ -622,9 +660,9 @@
         bestEl.textContent = "0";
       });
       pauseButton.addEventListener("click", pauseGame);
-      tapZone.addEventListener("pointerdown", handleAction);
+      tapZone.addEventListener("pointerdown", handleTouchAction);
       window.addEventListener("keydown", (event) => {
-        if (event.code === "Space" || event.code === "ArrowUp") handleAction(event);
+        if (event.code === "Space") handleAction(event);
         if (event.code === "KeyP" || event.code === "Escape") pauseGame();
       });
       window.addEventListener("resize", resize);
